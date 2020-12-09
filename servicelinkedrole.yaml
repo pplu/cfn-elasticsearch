@@ -1,0 +1,68 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Resources:
+  EnsuredServiceRoleLambdaRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+      - PolicyName: lambdaaddservicerole
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource: "*"
+          - Effect: Allow
+            Action:
+            - iam:CreateServiceLinkedRole
+            Resource: "*"
+  EnsuredServiceRole:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Runtime: python3.7
+      Handler: index.handler
+      Timeout: 300
+      Role: !GetAtt EnsuredServiceRoleLambdaRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          import cfnresponse
+          import botocore
+          import boto3
+          import logging
+          import traceback
+
+          LOGGER = logging.getLogger()
+          LOGGER.setLevel(logging.INFO)
+
+          client = boto3.client("iam")
+          def handler(event, context):
+            try:
+              LOGGER.info('Event structure: %s', event)
+
+              service = event['ResourceProperties']['Service']
+              if event['RequestType'] == 'Create' or event['RequestType'] == 'Update':
+                try:
+                  client.create_service_linked_role(AWSServiceName = service)
+                except client.exceptions.InvalidInputException as error:
+                  LOGGER.info('Captured expected exception: %s', error)
+
+                # Return the service as our physical ID, that way if the service field is
+                # changed, we will handle correctly
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, {}, service)
+              elif event['RequestType'] == 'Delete':
+                # Don't delete the service linked role, as we just want to assure it exists
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+            except Exception as e:
+              LOGGER.error(e)
+              cfnresponse.send(event, context, cfnresponse.FAILED, {})
+              traceback.print_exc()

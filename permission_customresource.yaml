@@ -1,0 +1,80 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Resources:
+  PutPermissionsExecutionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+      - PolicyName: lambdaputresourcepolicy
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:       
+          - Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource: "*" 
+          - Effect: Allow
+            Action:
+            - logs:PutResourcePolicy
+            - logs:DeleteResourcePolicy
+            Resource: "*" 
+  GiveLogsWritePermissionTo:
+    Type: "AWS::Lambda::Function"
+    Properties: 
+      Runtime: python3.7
+      Handler: index.handler
+      Timeout: 300
+      Role: !GetAtt PutPermissionsExecutionRole.Arn
+      #! Code inspired by: https://gist.github.com/sudharsans/cf9c52d7c78a81818a4a47872982bd76
+      Code:
+        ZipFile: |
+          import json
+          import cfnresponse
+          import boto3
+          import logging
+          import traceback
+          from string import Template
+
+          LOGGER = logging.getLogger()
+          LOGGER.setLevel(logging.INFO)
+
+          client = boto3.client("logs")
+          def PutPolicy(arn):
+            service = 'es.amazonaws.com'
+            policy_template = Template('{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"$service"},"Action":["logs:CreateLogStream","logs:PutLogEvents"],"Resource":"$arn"}]}')
+            policy = policy_template.substitute(arn = arn, service = service)
+            response = client.put_resource_policy(
+              policyName = arn,
+              policyDocument = policy,
+            )
+            return
+          def DeletePolicy(arn):
+            response = client.delete_resource_policy(
+              policyName=arn
+            )
+            return
+          def handler(event, context):
+            responseData = {}
+            try:
+              LOGGER.info('Event structure: %s', event)
+
+              loggroup_arn = event['ResourceProperties']['LogGroupArn']
+              if event['RequestType'] == 'Create' or event['RequestType'] == 'Update':
+                policy = PutPolicy(loggroup_arn)
+                LOGGER.info('Policy: %s', policy)
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, {}, loggroup_arn)
+              elif event['RequestType'] == 'Delete':
+                DeletePolicy(loggroup_arn)
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+            except Exception as e:
+              LOGGER.error(e)
+              cfnresponse.send(event, context, cfnresponse.FAILED, {})
+              traceback.print_exc()
