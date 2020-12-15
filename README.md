@@ -175,6 +175,20 @@ To use the Custom Resource:
       LogGroupArn: !GetAtt LogGroupApplication.Arn
 ```
 
+Note that on your ElasticSearch cluster, you must `DependOn` these resources, to assure they are created before CloudFormation creates the Elasticsearch cluster:
+
+```
+Resources:
+  ElasticSearch:
+    Type: AWS::Elasticsearch::Domain
+    DependsOn:
+    - AddResourcePolicyForIndexSlow
+    - AddResourcePolicyForIndexSlow
+    - AddResourcePolicyForApplication
+    Properties:
+      [...]
+```
+
 # Conclusions
 
 I feel AWS could do a lot to improve the user experience for automating ElasticSearch clusters, as there are some sharp edges:
